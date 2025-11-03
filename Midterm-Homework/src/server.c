@@ -74,7 +74,14 @@ int main(int argc, char **argv) {
             // 讀取 client 請求與回應邏輯
             for (;;) {
                 struct msg_hdr h; void *pl=NULL; uint32_t len=0;
-                if (recv_frame(cfd, &h, &pl, &len, g_robust.io_timeout_ms) < 0) { LOGW("client recv error: %s", strerror(errno)); break; }
+                if (recv_frame(cfd, &h, &pl, &len, g_robust.io_timeout_ms) < 0) {
+                    if (errno == ECONNRESET) { // 正常離線，不列為警告
+                        LOGI("client closed connection");
+                    } else {
+                        LOGW("client recv error: %s", strerror(errno));
+                    } 
+                    break; 
+                }
                 uint16_t t = ntohs(h.type);
                 if (t == REQ_PING) {
                     const char *ping = "ping";
