@@ -3,7 +3,7 @@
 # 功能說明：
 # 1. 這個 Makefile 可以自動建立整個 client-server 專案。
 # 2. 它會編譯共用函式庫 (libutils.so)，以及兩個執行檔 (server 與 client)。
-# 3. 支援兩層除錯控制：編譯期可用 ENABLE_DEBUG=1 啟用 DEBUG 宏，執行期則透過 LOG_LEVEL 環境變數或 -v 參數控制。
+# 3. 支援兩層除錯控制：編譯期可用 ENABLE_DEBUG=1 啟用 DEBUG Macro，執行期則透過 LOG_LEVEL 環境變數或 -v 參數控制。
 # 4. 自動建立必要的資料夾 (lib/, bin/)。
 # 5. 支援 clean 指令清除編譯產物。
 # 6. 所有目標皆依賴 include/ 與 src/ 下的程式碼。
@@ -20,7 +20,7 @@ SRCDIR  := $(PREFIX)/src
 LIBDIR  := $(PREFIX)/lib
 BINDIR  := $(PREFIX)/bin
 
-# 編譯期除錯開關：ENABLE_DEBUG=1 時會加入 -DENABLE_DEBUG 宏
+# 編譯期除錯開關：ENABLE_DEBUG=1 時會加入 -DENABLE_DEBUG Macro
 ifeq ($(ENABLE_DEBUG),1)
 CDEBUG := -DENABLE_DEBUG
 else
