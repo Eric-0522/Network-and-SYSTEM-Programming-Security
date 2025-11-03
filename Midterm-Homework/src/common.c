@@ -1,5 +1,9 @@
+// ============================================================
+// 這支檔案實作 libutils.so 中的共用函式。
+// 包含 Logging、Robust設定、Socket 工具、封包傳輸、
+// 以及系統資訊擷取等核心邏輯。
+// ============================================================
 #include "common.h"
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,14 +20,16 @@
 #include <sys/sysinfo.h>
 #include <stdarg.h>
 
-// ===== runtime logging =====
+// ===== Runtime Logging 實作 =====
+// 透過 log_set_level / log_msg 控制輸出層級
 static int g_log_level = LOG_INFO;
 static const char *g_prog = "app";
 
+// 設定 log 層級與名稱
 void log_set_level(int lvl) { g_log_level = lvl; }
-int  log_get_level(void) { return g_log_level; }
 void log_set_prog(const char *name) { g_prog = name ? name : g_prog; }
 
+// 輸出日誌訊息 (包含時間、PID、層級)
 void log_msg(int lvl, const char *fmt, ...) {
     if (lvl > g_log_level) return;
     const char *tag = (lvl==LOG_ERROR?"ERROR": lvl==LOG_WARN?"WARN": lvl==LOG_INFO?"INFO":"DEBUG");
@@ -33,15 +39,6 @@ void log_msg(int lvl, const char *fmt, ...) {
     fprintf(stderr, "%s.%03ld %s[%d] %s: ", ts, tv.tv_usec/1000, g_prog, (int)getpid(), tag);
     va_list ap; va_start(ap, fmt); vfprintf(stderr, fmt, ap); va_end(ap);
     fputc('\n', stderr);
-}
-
-static int getenv_loglvl(void) {
-    const char *e = getenv("LOG_LEVEL");
-    if (!e) return g_log_level;
-    int v = atoi(e);
-    if (v < LOG_ERROR) v = LOG_ERROR;
-    if (v > LOG_DEBUG) v = LOG_DEBUG;
-    return v;
 }
 
 // ===== robustness opts =====
@@ -57,20 +54,22 @@ void robust_set_defaults(int server_side) {
 
 // ===== signals =====
 static void ignore_pipe(void) {
-#ifdef SIGPIPE
-    if (g_robust.ignore_sigpipe)
-        signal(SIGPIPE, SIG_IGN);
-#endif
+    #ifdef SIGPIPE
+        if (g_robust.ignore_sigpipe)
+            signal(SIGPIPE, SIG_IGN);
+    #endif
 }
 
 int set_signal_handler(int signum, void (*handler)(int)) {
-    struct sigaction sa; memset(&sa, 0, sizeof sa);
-    sa.sa_handler = handler; sigemptyset(&sa.sa_mask);
+    struct sigaction sa; 
+    memset(&sa, 0, sizeof sa);
+    sa.sa_handler = handler; 
+    sigemptyset(&sa.sa_mask);
     sa.sa_flags = SA_RESTART;
     return sigaction(signum, &sa, NULL);
 }
 
-// ===== sockets =====
+// ===== Socket 實作 (listen/nonblock_connect/timeouts) =====
 static int nonblock_connect(int fd, const struct sockaddr *sa, socklen_t salen, int timeout_ms) {
     int rc = connect(fd, sa, salen);
     if (rc == 0) return 0;
@@ -180,7 +179,7 @@ ssize_t writen_timeout(int fd, const void *buf, size_t n, int timeout_ms) {
     }
     return (ssize_t)off;
 }
-
+// 驗證 header 
 static int validate_hdr(const struct msg_hdr *h) {
     if (!g_robust.validate_headers) return 1;
     if (ntohl(h->magic) != MSG_MAGIC) return 0;

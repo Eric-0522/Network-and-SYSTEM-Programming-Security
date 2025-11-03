@@ -1,5 +1,9 @@
+// ============================================================
+// 這支程式為伺服器端主程式，採用 fork() 模型。
+// 每個 client 連線都會由父行程 accept 後 fork 出子行程處理。
+// 子行程處理完畢後結束，由 SIGCHLD handler 回收資源。
+// ============================================================
 #include "common.h"
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -9,7 +13,9 @@
 #include <sys/wait.h>
 #include <arpa/inet.h>
 
+// 紀錄目前活躍子行程數量
 static volatile sig_atomic_t g_children = 0;
+// SIGCHLD handler：回收已結束的子行程
 static void sigchld_handler(int sig) {
     (void)sig;
     int status; pid_t pid;
@@ -19,6 +25,7 @@ static void sigchld_handler(int sig) {
     }
 }
 
+// SIGALRM handler：防止子行程卡死
 static void sigalrm_handler(int sig) {
     (void)sig; LOGW("child guard timeout, exiting");
     _exit(2);
@@ -29,12 +36,14 @@ static void usage(const char *arg0) {
 }
 
 int main(int argc, char **argv) {
+    // 初始化日誌與 Robustness 設定
     log_set_prog("server");
     log_set_level(getenv("LOG_LEVEL")? atoi(getenv("LOG_LEVEL")) : LOG_INFO);
     robust_set_defaults(1);
 
     const char *port = "9090"; const char *addr = NULL;
-
+    // 解析命令列參數
+    // 支援 -p, -l, -v, --no-robust
     for (int i=1;i<argc;i++) {
         if (!strcmp(argv[i], "-p") && i+1<argc) port = argv[++i];
         else if (!strcmp(argv[i], "-l") && i+1<argc) addr = argv[++i];
@@ -47,7 +56,8 @@ int main(int argc, char **argv) {
     int lfd = tcp_listen(addr, port, 128);
     if (lfd < 0) { LOGE("listen failed: %s", strerror(errno)); return 1; }
     LOGI("listening on %s:%s", addr?addr:"0.0.0.0", port);
-
+    
+    // 主迴圈不斷接受新連線
     for (;;) {
         struct sockaddr_storage ss; socklen_t slen = sizeof ss;
         int cfd = accept(lfd, (struct sockaddr*)&ss, &slen);
@@ -56,19 +66,19 @@ int main(int argc, char **argv) {
         pid_t pid = fork();
         if (pid < 0) { LOGE("fork: %s", strerror(errno)); close(cfd); continue; }
         if (pid == 0) {
-            // child
+            // 子行程：負責處理單一 client
             close(lfd);
             if (g_robust.child_guard_secs>0) { set_signal_handler(SIGALRM, sigalrm_handler); alarm(g_robust.child_guard_secs); }
             set_timeouts(cfd, g_robust.io_timeout_ms, g_robust.io_timeout_ms);
             LOGI("child %d handling client", (int)getpid());
-
+            // 讀取 client 請求與回應邏輯
             for (;;) {
                 struct msg_hdr h; void *pl=NULL; uint32_t len=0;
                 if (recv_frame(cfd, &h, &pl, &len, g_robust.io_timeout_ms) < 0) { LOGW("client recv error: %s", strerror(errno)); break; }
                 uint16_t t = ntohs(h.type);
                 if (t == REQ_PING) {
-                    const char *pong = "pong";
-                    send_frame(cfd, RESP_PING, pong, (uint32_t)strlen(pong), g_robust.io_timeout_ms);
+                    const char *ping = "ping";
+                    send_frame(cfd, RESP_PING, ping, (uint32_t)strlen(ping), g_robust.io_timeout_ms);
                 } else if (t == REQ_ECHO) {
                     send_frame(cfd, RESP_ECHO, pl, len, g_robust.io_timeout_ms);
                 } else if (t == REQ_SYSINFO) {

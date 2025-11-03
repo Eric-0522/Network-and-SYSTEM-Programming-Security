@@ -1,6 +1,10 @@
 #ifndef COMMON_H
 #define COMMON_H
-
+// ============================================================
+// 這個標頭檔定義整個專案共用的結構與函式介面。
+// 內容包括：封包協定格式、Logging 系統、Socket 工具、
+// robust_control 結構 (robust_opts) 與系統資訊擷取函式。
+// ============================================================
 #include <stdint.h>
 #include <stddef.h>
 #include <sys/types.h>
@@ -11,9 +15,10 @@
     extern "C" {
 #endif
 
-// ===== Protocol =====
-#define MSG_MAGIC 0x43534231u /* 'CSB1' */
+// ===== Protocol 定義=====
+#define MSG_MAGIC 0x43534231u 
 
+// 封包型別 (client 與 server 通訊指令)
 enum msg_type {
     REQ_PING      = 1,
     RESP_PING     = 2,
@@ -24,6 +29,7 @@ enum msg_type {
     RESP_ERROR    = 255
 };
 
+// 封包標頭結構 (固定 12 bytes)
 #pragma pack(push, 1)
 struct msg_hdr {
     uint32_t magic;   // MSG_MAGIC, network order
@@ -33,16 +39,13 @@ struct msg_hdr {
 };
 #pragma pack(pop)
 
-// ===== Logging (dual-level control) =====
-// Compile-time: built only if ENABLE_DEBUG is defined (Makefile)
-// Runtime: log level variable set by env LOG_LEVEL or CLI flag
-
+// ===== Logging (雙層除錯控制) =====
+// 編譯期：由 ENABLE_DEBUG 控制
+// 執行期：透過 -v 參數或 LOG_LEVEL 環境變數控制
 enum log_level { LOG_ERROR=0, LOG_WARN=1, LOG_INFO=2, LOG_DEBUG=3 };
 
 void log_set_level(int lvl);
-int  log_get_level(void);
 void log_set_prog(const char *name);
-
 void log_msg(int lvl, const char *fmt, ...) __attribute__((format(printf,2,3)));
 
 // Macros: debug compiled out unless ENABLE_DEBUG
@@ -65,11 +68,11 @@ int  set_timeouts(int fd, int rcv_ms, int snd_ms);
 ssize_t readn_timeout(int fd, void *buf, size_t n, int timeout_ms);
 ssize_t writen_timeout(int fd, const void *buf, size_t n, int timeout_ms);
 
-// Framed I/O
+// Framed I/O 封包傳輸函式
 int  send_frame(int fd, uint16_t type, const void *payload, uint32_t len, int timeout_ms);
 int  recv_frame(int fd, struct msg_hdr *hdr_out, void **payload_out, uint32_t *len_out, int timeout_ms);
 
-// Error helpers
+// Error helpers (信號處理函式)
 int  set_signal_handler(int signum, void (*handler)(int));
 
 // System info
@@ -78,10 +81,10 @@ char *get_system_info(void);
 
 // Robustness toggles exposed to both sides
 struct robust_opts {
-    int enable_timeouts;         // 1=use read/write timeouts
-    int io_timeout_ms;           // default 5000
-    int validate_headers;        // 1=validate magic/type/len bounds
-    int ignore_sigpipe;          // 1=ignore SIGPIPE
+    int enable_timeouts;         // 是否啟用 I/O 逾時
+    int io_timeout_ms;           // 逾時時間 default 5000
+    int validate_headers;        // 是否驗證封包標頭
+    int ignore_sigpipe;          // 是否忽略 SIGPIPE
     int child_guard_secs;        // per-connection alarm() in server child
 };
 
