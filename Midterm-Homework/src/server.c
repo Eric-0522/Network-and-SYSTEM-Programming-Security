@@ -32,7 +32,7 @@ static void sigalrm_handler(int sig) {
 }
 
 static void usage(const char *arg0) {
-    fprintf(stderr, "Usage: %s [-p port] [-l addr] [-v level] [--no-robust]\n", arg0);
+    fprintf(stderr, "Usage: %s [-p port] [-l addr] [-v level] [--no-robust] [--max-reqs N]\n", arg0);
 }
 
 int main(int argc, char **argv) {
@@ -48,19 +48,22 @@ int main(int argc, char **argv) {
         if (!strcmp(argv[i], "-p") && i+1<argc) port = argv[++i];
         else if (!strcmp(argv[i], "-l") && i+1<argc) addr = argv[++i];
         else if (!strcmp(argv[i], "-v") && i+1<argc) log_set_level(atoi(argv[++i]));
-        else if (!strcmp(argv[i], "--no-robust")) { g_robust.enable_timeouts=0; g_robust.validate_headers=0; g_robust.ignore_sigpipe=0; g_robust.child_guard_secs=0; }
+        else if (!strcmp(argv[i], "--no-robust")) { g_robust.enable_timeouts=0; g_robust.validate_headers=0; g_robust.ignore_sigpipe=0; g_robust.child_guard_secs=0; g_robust.max_reqs_per_conn=0; }
+        else if (!strcmp(argv[i], "--max-reqs") && i+1<argc) {
+            g_robust.max_reqs_per_conn = atoi(argv[++i]);  // 0 = 無上限
+        }
         else { usage(argv[0]); return 2; }
     }
 
-    set_signal_handler(SIGCHLD, sigchld_handler);
-    int lfd = tcp_listen(addr, port, 128);
+    set_signal_handler(SIGCHLD, sigchld_handler); // 設定 SIGCHLD handler
+    int lfd = tcp_listen(addr, port, 128);  // 建立監聽 socket
     if (lfd < 0) { LOGE("listen failed: %s", strerror(errno)); return 1; }
     LOGI("listening on %s:%s", addr?addr:"0.0.0.0", port);
     
     // 主迴圈不斷接受新連線
     for (;;) {
         struct sockaddr_storage ss; socklen_t slen = sizeof ss;
-        int cfd = accept(lfd, (struct sockaddr*)&ss, &slen);
+        int cfd = accept(lfd, (struct sockaddr*)&ss, &slen); // 接受新連線
         if (cfd < 0) { if (errno==EINTR) continue; LOGE("accept: %s", strerror(errno)); continue; }
 
         pid_t pid = fork();
@@ -71,21 +74,28 @@ int main(int argc, char **argv) {
             if (g_robust.child_guard_secs>0) { set_signal_handler(SIGALRM, sigalrm_handler); alarm(g_robust.child_guard_secs); }
             set_timeouts(cfd, g_robust.io_timeout_ms, g_robust.io_timeout_ms);
             LOGI("child %d handling client", (int)getpid());
+            /* 每連線最大請求數：環境變數 MAX_REQS_PER_CONN 可覆寫，預設 16 */
+            int reqs = 0;
+            const int max_reqs = g_robust.max_reqs_per_conn; // 0 表示無上限
+            LOGD("child %d: max_reqs_per_conn=%d", (int)getpid(), max_reqs);
             // 讀取 client 請求與回應邏輯
             for (;;) {
                 struct msg_hdr h; void *pl=NULL; uint32_t len=0;
                 if (recv_frame(cfd, &h, &pl, &len, g_robust.io_timeout_ms) < 0) {
-                    if (errno == ECONNRESET) { // 正常離線，不列為警告
-                        LOGI("client closed connection");
+                    LOGW("client recv error: %s", strerror(errno));
+                    /*
+                    if (errno == ECONNRESET) {
+                        LOGI("client closed connection");      // 正常離線
                     } else {
-                        LOGW("client recv error: %s", strerror(errno));
-                    } 
-                    break; 
+                        
+                    }*/
+                    break;
                 }
                 uint16_t t = ntohs(h.type);
                 if (t == REQ_PING) {
-                    const char *ping = "ping";
-                    send_frame(cfd, RESP_PING, ping, (uint32_t)strlen(ping), g_robust.io_timeout_ms);
+                    char pong[64];
+                    snprintf(pong, sizeof(pong), "pong from pid %d", (int)getpid()); // 將目前子行程 PID 加入回應
+                    send_frame(cfd, RESP_PING, pong, (uint32_t)strlen(pong), g_robust.io_timeout_ms);
                 } else if (t == REQ_ECHO) {
                     send_frame(cfd, RESP_ECHO, pl, len, g_robust.io_timeout_ms);
                 } else if (t == REQ_SYSINFO) {
@@ -102,6 +112,14 @@ int main(int argc, char **argv) {
                     send_frame(cfd, RESP_ERROR, err, (uint32_t)strlen(err), g_robust.io_timeout_ms);
                 }
                 free(pl);
+                /* 遞增次數並檢查是否達上限 */
+                if (max_reqs > 0) {
+                    if (++reqs >= max_reqs) {
+                        LOGI("child %d: reached max requests per connection (%d), closing",
+                            (int)getpid(), max_reqs);
+                        break;
+                    }
+                }
             }
             close(cfd);
             LOGI("child %d done", (int)getpid());

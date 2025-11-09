@@ -86,6 +86,7 @@ struct robust_opts {
     int validate_headers;        // 是否驗證封包標頭
     int ignore_sigpipe;          // 是否忽略 SIGPIPE
     int child_guard_secs;        // per-connection alarm() in server child
+    int max_reqs_per_conn;       // 每連線最大請求數 (0 = unlimited)
 };
 
 extern struct robust_opts g_robust;
