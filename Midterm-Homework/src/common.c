@@ -52,6 +52,11 @@ void robust_set_defaults(int server_side) {
     g_robust.child_guard_secs= server_side ? 60 : 0;
     // 預設：server 每個連線最多 16 個請求；
     g_robust.max_reqs_per_conn = server_side ? 16 : 0;
+    const char *mrc = getenv("MAX_REQS_PER_CONN");
+    if (mrc) {
+        int v = atoi(mrc);
+        if (v >= 0) g_robust.max_reqs_per_conn = v; 
+    }
 }
 
 // ===== signals =====
