@@ -82,13 +82,11 @@ int main(int argc, char **argv) {
             for (;;) {
                 struct msg_hdr h; void *pl=NULL; uint32_t len=0;
                 if (recv_frame(cfd, &h, &pl, &len, g_robust.io_timeout_ms) < 0) {
-                    LOGW("client recv error: %s", strerror(errno));
-                    /*
                     if (errno == ECONNRESET) {
                         LOGI("client closed connection");      // 正常離線
                     } else {
-                        
-                    }*/
+                        LOGW("client recv error: %s", strerror(errno));
+                    }
                     break;
                 }
                 uint16_t t = ntohs(h.type);
